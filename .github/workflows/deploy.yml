@@ -3,7 +3,7 @@ name: Deploy AI Digital Twin
 on:
   push:
     branches:
-      - main
+      - master
   workflow_dispatch:
     inputs:
       environment:
