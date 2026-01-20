@@ -1,4 +1,5 @@
 name: Destroy AI Digital Twin
+# Manual workflow to destroy infrastructure
 
 on:
   workflow_dispatch:
