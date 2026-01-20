@@ -1,0 +1,128 @@
+name: Destroy AI Digital Twin
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+      confirmation:
+        description: 'Type the environment name to confirm destruction'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: twin
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    name: Destroy ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirmation }}" != "${{ github.event.inputs.environment }}" ]; then
+            echo "Error: Confirmation does not match environment name"
+            echo "Expected: ${{ github.event.inputs.environment }}"
+            echo "Got: ${{ github.event.inputs.confirmation }}"
+            exit 1
+          fi
+          echo "Confirmation validated. Proceeding with destruction..."
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set stack name
+        id: env
+        run: |
+          echo "stack_name=${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+
+      - name: Check if stack exists
+        id: check
+        run: |
+          if aws cloudformation describe-stacks --stack-name "${{ steps.env.outputs.stack_name }}" 2>&1 | grep -q "does not exist"; then
+            echo "exists=false" >> $GITHUB_OUTPUT
+          else
+            echo "exists=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get S3 buckets
+        if: steps.check.outputs.exists == 'true'
+        id: buckets
+        run: |
+          STACK_NAME="${{ steps.env.outputs.stack_name }}"
+          OUTPUTS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].Outputs')
+
+          echo "frontend_bucket=$(echo $OUTPUTS | jq -r '.[] | select(.OutputKey=="FrontendBucketName") | .OutputValue')" >> $GITHUB_OUTPUT
+          echo "memory_bucket=$(echo $OUTPUTS | jq -r '.[] | select(.OutputKey=="MemoryBucketName") | .OutputValue')" >> $GITHUB_OUTPUT
+
+      - name: Empty frontend bucket
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          BUCKET="${{ steps.buckets.outputs.frontend_bucket }}"
+          if [ -n "$BUCKET" ] && [ "$BUCKET" != "null" ]; then
+            echo "Emptying frontend bucket: $BUCKET"
+            aws s3 rm "s3://$BUCKET" --recursive || true
+          fi
+
+      - name: Empty memory bucket
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          BUCKET="${{ steps.buckets.outputs.memory_bucket }}"
+          if [ -n "$BUCKET" ] && [ "$BUCKET" != "null" ]; then
+            echo "Emptying memory bucket: $BUCKET"
+
+            # Delete all versions
+            aws s3api list-object-versions --bucket "$BUCKET" \
+              --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null | \
+              jq -c 'select(.Objects != null) | .Objects[]' | while read obj; do
+                KEY=$(echo "$obj" | jq -r '.Key')
+                VERSION=$(echo "$obj" | jq -r '.VersionId')
+                aws s3api delete-object --bucket "$BUCKET" --key "$KEY" --version-id "$VERSION" || true
+              done
+
+            # Delete delete markers
+            aws s3api list-object-versions --bucket "$BUCKET" \
+              --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null | \
+              jq -c 'select(.Objects != null) | .Objects[]' | while read obj; do
+                KEY=$(echo "$obj" | jq -r '.Key')
+                VERSION=$(echo "$obj" | jq -r '.VersionId')
+                aws s3api delete-object --bucket "$BUCKET" --key "$KEY" --version-id "$VERSION" || true
+              done
+          fi
+
+      - name: Delete CloudFormation stack
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          STACK_NAME="${{ steps.env.outputs.stack_name }}"
+          echo "Deleting stack: $STACK_NAME"
+          aws cloudformation delete-stack --stack-name "$STACK_NAME"
+          echo "Waiting for stack deletion..."
+          aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME"
+
+      - name: Destruction summary
+        run: |
+          echo "## Destruction Complete! :wastebasket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Stack:** ${{ steps.env.outputs.stack_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check.outputs.exists }}" == "true" ]; then
+            echo "All resources have been deleted." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Stack did not exist. No resources were deleted." >> $GITHUB_STEP_SUMMARY
+          fi

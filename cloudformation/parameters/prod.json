@@ -1,0 +1,26 @@
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "prod"
+  },
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "twin"
+  },
+  {
+    "ParameterKey": "OpenAIApiKey",
+    "ParameterValue": "PLACEHOLDER"
+  },
+  {
+    "ParameterKey": "OpenAIModel",
+    "ParameterValue": "gpt-4o"
+  },
+  {
+    "ParameterKey": "LambdaMemory",
+    "ParameterValue": "1024"
+  },
+  {
+    "ParameterKey": "LambdaTimeout",
+    "ParameterValue": "60"
+  }
+]
