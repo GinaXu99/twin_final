@@ -86,8 +86,8 @@ jobs:
             aws cloudformation create-stack \
               --stack-name "$STACK_NAME" \
               --template-body file://cloudformation/main.yaml \
-              --parameters file://cloudformation/parameters/${{ steps.env.outputs.environment }}.json \ 
-                ParameterKey=OpenAIApiKey,ParameterValue=${{ secrets.OPENAI_API_KEY }} \  
+              --parameters \
+                ParameterKey=OpenAIApiKey,ParameterValue=${{ secrets.OPENAI_API_KEY }} \
               --capabilities CAPABILITY_NAMED_IAM \
               --tags Key=Environment,Value=${{ steps.env.outputs.environment }} Key=Project,Value=${{ env.PROJECT_NAME }}
 
@@ -97,7 +97,7 @@ jobs:
             aws cloudformation update-stack \
               --stack-name "$STACK_NAME" \
               --template-body file://cloudformation/main.yaml \
-              --parameters file://cloudformation/parameters/${{ steps.env.outputs.environment }}.json \ 
+              --parameters \
                 ParameterKey=OpenAIApiKey,ParameterValue=${{ secrets.OPENAI_API_KEY }} \   
               --capabilities CAPABILITY_NAMED_IAM 2>&1 || true
 
